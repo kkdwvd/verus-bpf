@@ -1,0 +1,3 @@
+[submodule "dep/verus"]
+	path = dep/verus
+	url = https://github.com/verus-lang/verus.git
