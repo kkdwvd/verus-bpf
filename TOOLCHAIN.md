@@ -71,12 +71,21 @@ crate is always verified with `--no-cheating` and imports no BPF libraries.
 Cargo dependencies on Verus macros can use
 `dep/verus-bpf/dep/verus/source/builtin_macros` relative to the consumer.
 
+`MUTANTS` lists unified diffs against `SRC`, relative to the program
+directory: variants of the program that its contracts must reject. `verify`
+applies each to a copy of `SRC`, runs the program's own verification pass on
+it, and fails unless Verus reports at least one verification error; a mutant
+that fails to compile is an error too, since it says nothing about the
+contracts. Leading lines before the first hunk are ignored by `patch`, so a
+patch can open with a comment saying what it breaks. `verify-mutants` runs
+only those.
+
 Supply `VMLINUX`, or `KERNEL_DIR` and `KERNEL_BUILD`, for the target kernel.
 The object's kfunc BTF prototypes are copied from that kernel's BTF. Use the
 same kernel to run it. No kernel is downloaded or built by this repository.
 
-Targets: `all`, `verify`, `lint-trusted`, `trusted-lines`, `rust-project`,
-`clean`, `distclean`, and `help`. `make help` in a consumer prints resolved
+Targets: `all`, `verify`, `verify-mutants`, `lint-trusted`, `trusted-lines`,
+`rust-project`, `clean`, `distclean`, and `help`. `make help` in a consumer prints resolved
 variables. `BUILD_DIR` defaults to `$(ROOT_DIR)/build`; `DEPDIR` and `HOSTDIR`
 select cached BPF libraries and host artifacts. A toolchain/configuration stamp invalidates cached artifacts when the Rust
 compiler, Verus pin, selected tools, or consumer configuration changes.
