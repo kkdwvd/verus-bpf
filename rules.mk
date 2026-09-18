@@ -320,6 +320,47 @@ endef
 
 $(foreach c,$(LIB_CRATES),$(eval $(call lib_crate_rules,$(c))))
 
+# --- verification, the mutants ---
+# MUTANTS lists unified diffs against $(SRC), relative to the program
+# directory: policies that must not verify. Defined before `verify`, whose
+# prerequisite list is expanded when that rule is read. Each is applied to a copy of
+# the policy and put through the same pass `verify` runs, and the build
+# fails unless Verus rejects it -- with a verification error, not a
+# compile error, since a mutant that does not build says nothing about the
+# contracts. The header of each patch says which step of a contract it
+# breaks and which known scheduler bug it reproduces.
+MUTANTS ?=
+MUTANT_OUT := $(OUT)/mutants
+mutant_name = $(basename $(notdir $(1)))
+mutant_stamp = $(MUTANT_OUT)/$(call mutant_name,$(1)).stamp
+mutant_log = $(MUTANT_OUT)/$(call mutant_name,$(1)).log
+mutant_src = $(MUTANT_OUT)/$(call mutant_name,$(1)).rs
+MUTANT_STAMPS := $(foreach m,$(MUTANTS),$(call mutant_stamp,$(m)))
+
+define mutant_rules
+$(call mutant_stamp,$(1)): $(1) $(SRC) $(LIB_VIRS) $(LIB_HOST_RLIBS) \
+		$(HOST_BTF_RLIB) $(BTF_MACROS_SO) $(VERUS) | lint-trusted
+	@mkdir -p $(MUTANT_OUT)
+	@cp $(SRC) $(call mutant_src,$(1))
+	@patch -s $(call mutant_src,$(1)) $(1)
+	@if $(VERUS) $(call nocheat,$(PROG)) --crate-type=lib --crate-name $(PROG) \
+		$(call host_imports,$(LIB_CRATES)) $(HOST_DEP_SEARCH) \
+		$(call mutant_src,$(1)) > $(call mutant_log,$(1)) 2>&1; then \
+		echo 'mutant $(call mutant_name,$(1)): verified, but the contracts must reject it' >&2; \
+		exit 1; fi
+	@grep -qE '^verification results:: [0-9]+ verified, [1-9][0-9]* errors' \
+		$(call mutant_log,$(1)) || { \
+		echo 'mutant $(call mutant_name,$(1)): did not build, so the contracts were never asked' >&2; \
+		cat $(call mutant_log,$(1)) >&2; exit 1; }
+	@touch $$@
+endef
+$(foreach m,$(MUTANTS),$(eval $(call mutant_rules,$(m))))
+
+.PHONY: verify-mutants
+verify-mutants: $(MUTANT_STAMPS)
+	@$(foreach m,$(MUTANTS),printf '%-24s %s\n' 'mutant $(call mutant_name,$(m))' \
+		"$$(grep -E '^verification results::' $(call mutant_log,$(m)))";)
+
 # --- verification, the crate the loader calls ---
 # A crate of its own, and a leaf: it imports none of the BPF crates and
 # depends on nothing but the `verus!` macro, so its pass names no rlibs and
@@ -357,46 +398,6 @@ verify: $(OUT)/verify.stamp $(if $(USER_CORE_SRC),$(USER_CORE_STAMP)) $(MUTANT_S
 	@$(foreach m,$(MUTANTS),printf '%-24s %s\n' 'mutant $(call mutant_name,$(m))' \
 		"$$(grep -E '^verification results::' $(call mutant_log,$(m)))";)
 	@$(MAKE) --no-print-directory trusted-lines
-
-# --- verification, the mutants ---
-# MUTANTS lists unified diffs against $(SRC), relative to the program
-# directory: policies that must not verify. Each is applied to a copy of
-# the policy and put through the same pass `verify` runs, and the build
-# fails unless Verus rejects it -- with a verification error, not a
-# compile error, since a mutant that does not build says nothing about the
-# contracts. The header of each patch says which step of a contract it
-# breaks and which known scheduler bug it reproduces.
-MUTANTS ?=
-MUTANT_OUT := $(OUT)/mutants
-mutant_name = $(basename $(notdir $(1)))
-mutant_stamp = $(MUTANT_OUT)/$(call mutant_name,$(1)).stamp
-mutant_log = $(MUTANT_OUT)/$(call mutant_name,$(1)).log
-mutant_src = $(MUTANT_OUT)/$(call mutant_name,$(1)).rs
-MUTANT_STAMPS := $(foreach m,$(MUTANTS),$(call mutant_stamp,$(m)))
-
-define mutant_rules
-$(call mutant_stamp,$(1)): $(1) $(SRC) $(LIB_VIRS) $(LIB_HOST_RLIBS) \
-		$(HOST_BTF_RLIB) $(BTF_MACROS_SO) $(VERUS) | lint-trusted
-	@mkdir -p $(MUTANT_OUT)
-	@cp $(SRC) $(call mutant_src,$(1))
-	@patch -s $(call mutant_src,$(1)) $(1)
-	@if $(VERUS) $(call nocheat,$(PROG)) --crate-type=lib --crate-name $(PROG) \
-		$(call host_imports,$(LIB_CRATES)) $(HOST_DEP_SEARCH) \
-		$(call mutant_src,$(1)) > $(call mutant_log,$(1)) 2>&1; then \
-		echo 'mutant $(call mutant_name,$(1)): verified, but the contracts must reject it' >&2; \
-		exit 1; fi
-	@grep -qE '^verification results:: [0-9]+ verified, [1-9][0-9]* errors' \
-		$(call mutant_log,$(1)) || { \
-		echo 'mutant $(call mutant_name,$(1)): did not build, so the contracts were never asked' >&2; \
-		cat $(call mutant_log,$(1)) >&2; exit 1; }
-	@touch $$@
-endef
-$(foreach m,$(MUTANTS),$(eval $(call mutant_rules,$(m))))
-
-.PHONY: verify-mutants
-verify-mutants: $(MUTANT_STAMPS)
-	@$(foreach m,$(MUTANTS),printf '%-24s %s\n' 'mutant $(call mutant_name,$(m))' \
-		"$$(grep -E '^verification results::' $(call mutant_log,$(m)))";)
 
 # --- BPF program bitcode ---
 # The erased pass. No --cfg verus_keep_ghost, so the verus! macro drops the
