@@ -105,7 +105,17 @@ LLVM links the bitcode and `multi3.ll`; `bpf-postproc` lowers BTF field
 polyfills to CO-RE intrinsics. Optimization internalizes everything except
 `KEEP_SYMS`. `add_ksyms.py` mirrors kfunc prototypes from the kernel and
 lowers unsupported control flow. `btf_fixup.py` repairs DWARF descriptions
-before llc emits the object and BTF. These transformations are trusted.
+before llc emits the object and BTF, with jump tables turned off: LLVM 22
+lowers a dense `switch` to a `gotox` table in a `.jumptables` section, which
+the verifier of current kernels rejects. These transformations are trusted.
+
+Two things a consumer may put in a library crate that the pipeline passes
+through untouched: a BTF-defined map, a static in a `.maps` section whose
+struct type spells the map parameters as pointers to arrays, named in
+`KEEP_SYMS`; and BPF helper calls, made through a function pointer built
+from the helper number, which the backend lowers to `call N`. Neither is a
+kfunc, so `add_ksyms.py` does not see them; libbpf creates the map from the
+BTF and the verifier checks the helper by number.
 
 The optional loader is built by Cargo using the same rustc, with ghost
 code erased. It is not verified; only its explicitly supplied logic crate

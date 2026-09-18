@@ -22,7 +22,11 @@
 #   opt -internalize -globaldce -O2                            (strip the rest)
 #   add_ksyms.py                                               (.ksyms + BTF)
 #   btf_fixup.py                              (BTF the kernel will accept)
-#   llc -march=bpfel -mcpu=v4                                  (the .o)
+#   llc -march=bpfel -mcpu=v4 -disable-gotox                   (the .o)
+#     No jump tables: LLVM 22 lowers a dense `switch` to a `gotox` table in
+#     a `.jumptables` section, and the verifier of the kernels this targets
+#     rejects the pattern ("pointer += pointer prohibited"). Nothing a
+#     scheduler compiles gains from one.
 #   cargo build --release                        (the userspace loader)
 #
 # There is no allocator and no liballoc: the only kfuncs a #[global_allocator]
@@ -464,7 +468,7 @@ $(OUT)/$(PROG)-ksyms.bc: $(OUT)/$(PROG)-opt.bc $(ADD_KSYMS) $(BTF_FIXUP) $(VMLIN
 
 # --- final BPF object ---
 $(OUT)/$(PROG).o: $(OUT)/$(PROG)-ksyms.bc
-	$(LLC) -march=bpfel -mcpu=v4 -filetype=obj -o $@.tmp $<
+	$(LLC) -march=bpfel -mcpu=v4 -disable-gotox -filetype=obj -o $@.tmp $<
 	$(LLVM_OBJCOPY) \
 		--remove-section=.eh_frame --remove-section=.rel.eh_frame \
 		--remove-section=.gcc_except_table \
